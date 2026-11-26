@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>MIYONI Administration</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+  <!-- Authentication Gate -->
+  <div id="auth-view" class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-brand">MIYONI<span>.</span></div>
+      <div style="color: var(--text-muted); font-size: 0.85rem;">Private Administration Console</div>
+
+      <div id="auth-alert" class="alert alert-error hidden" role="alert"></div>
+      <div id="auth-config-notice" class="alert alert-info hidden">
+        SmartBase Email verification is not configured on this server yet. Set <code>ADMIN_EMAIL</code> and <code>SMARTBASE_EMAIL_API_KEY</code> in environment secrets.
+      </div>
+
+      <!-- Step 1: Email Verification Request -->
+      <form id="email-step-form">
+        <h1 class="auth-title">Administrator Sign In</h1>
+        <p class="auth-subtitle">Enter the authorized MIYONI administrator email address to receive a one-time verification code via SmartBase Email.</p>
+        <div class="field" style="margin-bottom: 16px;">
+          <label for="admin-email-input">Authorized Administrator Email</label>
+          <input id="admin-email-input" type="email" class="input" required autocomplete="email" placeholder="administrator@miyoni.de5.net" />
+        </div>
+        <button id="send-code-btn" type="submit" class="btn btn-primary" style="width: 100%;">Send Verification Code</button>
+      </form>
+
+      <!-- Step 2: Code Entry -->
+      <form id="code-step-form" class="hidden">
+        <h1 class="auth-title">Enter Verification Code</h1>
+        <p class="auth-subtitle">A verification code was dispatched to <strong id="pending-email-label"></strong>.</p>
+        <div class="field" style="margin-bottom: 16px;">
+          <label for="verification-code-input">Verification Code</label>
+          <input id="verification-code-input" type="text" class="input font-mono" required autocomplete="one-time-code" placeholder="Enter code" />
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button id="verify-code-btn" type="submit" class="btn btn-primary" style="flex: 1;">Verify &amp; Enter Dashboard</button>
+          <button id="back-to-email-btn" type="button" class="btn btn-secondary">Back</button>
+        </div>
+      </form>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-hairline); display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--text-muted);">
+        <a href="/" style="color: var(--accent-blue); text-decoration: none;">Return to Public Site</a>
+        <span>Single-Admin Access Only</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Authenticated Admin Workspace -->
+  <div id="dashboard-view" class="admin-shell hidden">
+    <aside class="admin-sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-title">MIYONI<span>.</span></div>
+        <a href="/" target="_blank" rel="noopener noreferrer" style="font-size: 0.78rem; color: var(--accent-blue); text-decoration: none;">View Site</a>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Admin sections">
+        <button type="button" class="nav-item active" data-section="overview">Overview</button>
+        <button type="button" class="nav-item" data-section="create-post">Create Post</button>
+        <button type="button" class="nav-item" data-section="manage-posts">Manage Posts</button>
+        <button type="button" class="nav-item" data-section="drafts">Drafts</button>
+        <button type="button" class="nav-item" data-section="published">Published Articles</button>
+        <div class="nav-divider"></div>
+        <button type="button" class="nav-item" data-section="products">Products Management</button>
+        <button type="button" class="nav-item" data-section="media">Media Library</button>
+        <button type="button" class="nav-item" data-section="categories">Categories</button>
+        <div class="nav-divider"></div>
+        <button type="button" class="nav-item" data-section="company">Company Information</button>
+        <button type="button" class="nav-item" data-section="founder">Founder Information</button>
+        <button type="button" class="nav-item" data-section="seo">SEO Management</button>
+        <button type="button" class="nav-item" data-section="activity">Activity Logs</button>
+        <button type="button" class="nav-item" data-section="settings">Settings</button>
+      </nav>
+
+      <div style="padding-top: 16px; border-top: 1px solid var(--border-hairline);">
+        <div id="admin-user-label" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis;"></div>
+        <button id="logout-btn" type="button" class="btn btn-danger" style="width: 100%;">Logout</button>
+      </div>
+    </aside>
+
+    <div class="admin-main">
+      <header class="admin-topbar">
+        <div id="topbar-title" class="topbar-breadcrumb">Dashboard / Overview</div>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="refresh-dashboard-btn">Refresh Data</button>
+          <button type="button" class="btn btn-primary btn-sm" id="quick-new-post-btn">New Post</button>
+        </div>
+      </header>
+
+      <main class="admin-content">
+        <div id="global-toast" class="alert hidden" role="status"></div>
+
+        <!-- 1. OVERVIEW -->
+        <section id="sec-overview" class="admin-section">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Total Posts</div>
+              <div class="stat-value tabular-nums" id="stat-total-posts">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Published Articles</div>
+              <div class="stat-value tabular-nums" id="stat-published-posts">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Draft Posts</div>
+              <div class="stat-value tabular-nums" id="stat-draft-posts">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Products</div>
+              <div class="stat-value tabular-nums" id="stat-total-products">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Uploaded Media</div>
+              <div class="stat-value tabular-nums" id="stat-uploaded-media">0</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Recent Publishing &amp; Admin Activity</h2>
+              <span id="storage-mode-label" style="font-size: 0.82rem; color: var(--text-muted);"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="overview-activity-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. CREATE / EDIT POST -->
+        <section id="sec-create-post" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title" id="post-editor-heading">Create New Article or Announcement</h2>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="preview-post-btn">Preview Article</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="reset-post-form-btn">Clear Editor</button>
+              </div>
+            </div>
+
+            <form id="post-form" class="form-grid">
+              <input type="hidden" id="post-id" />
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-title">Post Title</label>
+                  <input id="post-title" type="text" class="input" required placeholder="e.g. SmartBase Cloud SQL Update" />
+                </div>
+                <div class="field">
+                  <label for="post-slug">Permanent URL Slug</label>
+                  <input id="post-slug" type="text" class="input font-mono" placeholder="auto-generated-from-title" />
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-type">Content Type</label>
+                  <select id="post-type" class="select">
+                    <option value="Company announcements">Company announcements</option>
+                    <option value="Product launches">Product launches</option>
+                    <option value="Product updates">Product updates</option>
+                    <option value="New features">New features</option>
+                    <option value="Technical articles">Technical articles</option>
+                    <option value="Company milestones">Company milestones</option>
+                    <option value="Founder announcements">Founder announcements</option>
+                    <option value="Development updates">Development updates</option>
+                    <option value="Educational articles">Educational articles</option>
+                    <option value="General news">General news</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="post-category">Category</label>
+                  <select id="post-category" class="select"></select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="post-excerpt">Short Description / Excerpt</label>
+                <textarea id="post-excerpt" class="textarea" style="min-height: 76px;" placeholder="Concise summary displayed on news cards and search snippets..."></textarea>
+              </div>
+
+              <div class="field">
+                <label>Rich Content Editor</label>
+                <div class="editor-toolbar" role="toolbar" aria-label="Formatting tools">
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="bold">Bold</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="italic">Italic</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="formatBlock" data-val="H2">Heading 2</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="formatBlock" data-val="H3">Heading 3</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="insertUnorderedList">Bullet List</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="insertOrderedList">Numbered List</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-cmd="formatBlock" data-val="BLOCKQUOTE">Quote</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="insert-link-btn">Add Link</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="insert-image-btn">Insert Media</button>
+                </div>
+                <div id="post-editor" class="editor-surface" contenteditable="true"></div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-cover-image">Cover Image URL (or upload below)</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input id="post-cover-image" type="text" class="input" placeholder="/media/... or /assets/founder-office.png" />
+                    <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+                      Upload
+                      <input type="file" id="cover-upload-input" accept="image/*" class="hidden" />
+                    </label>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="post-youtube-url">YouTube Video URL</label>
+                  <input id="post-youtube-url" type="url" class="input" placeholder="https://www.youtube.com/watch?v=..." />
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-product-slug">Related MIYONI Product</label>
+                  <select id="post-product-slug" class="select">
+                    <option value="">None</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="post-product-url">Product URL Override</label>
+                  <input id="post-product-url" type="url" class="input" placeholder="https://smartbase.de5.net/" />
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-gallery-urls">Multiple Gallery Image URLs (one per line or upload)</label>
+                  <textarea id="post-gallery-urls" class="textarea" style="min-height: 76px;" placeholder="/media/image-1.png"></textarea>
+                  <label class="btn btn-secondary btn-sm" style="width: fit-content; cursor: pointer;">
+                    Upload Gallery Images
+                    <input type="file" id="gallery-upload-input" accept="image/*" multiple class="hidden" />
+                  </label>
+                </div>
+                <div class="field">
+                  <label for="post-external-urls">External Reference URLs (one per line)</label>
+                  <textarea id="post-external-urls" class="textarea" style="min-height: 76px;" placeholder="https://smartbase.de5.net/"></textarea>
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-tags">Tags (comma-separated)</label>
+                  <input id="post-tags" type="text" class="input" placeholder="SmartBase, Cloud, Malawi" />
+                </div>
+                <div class="field">
+                  <label for="post-author">Author Name</label>
+                  <input id="post-author" type="text" class="input" value="Roosevelt Chikwende" />
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-seo-title">SEO Title</label>
+                  <input id="post-seo-title" type="text" class="input" placeholder="Custom search engine title" />
+                </div>
+                <div class="field">
+                  <label for="post-seo-desc">SEO Meta Description</label>
+                  <input id="post-seo-desc" type="text" class="input" placeholder="120-160 character search snippet" />
+                </div>
+              </div>
+
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="post-canonical">Canonical URL (optional)</label>
+                  <input id="post-canonical" type="url" class="input" placeholder="https://miyoni.de5.net/news/..." />
+                </div>
+                <div class="field">
+                  <label for="post-social-image">Social Sharing Image URL (optional)</label>
+                  <input id="post-social-image" type="text" class="input" placeholder="Defaults to cover image" />
+                </div>
+              </div>
+
+              <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding-top: 12px; border-top: 1px solid var(--border-hairline);">
+                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input id="post-featured" type="checkbox" />
+                  <span>Feature this article</span>
+                </label>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <button type="button" id="save-draft-btn" class="btn btn-secondary">Save as Draft</button>
+                  <button type="button" id="publish-post-btn" class="btn btn-primary">Publish Immediately</button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div id="post-preview-panel" class="panel hidden">
+            <div class="panel-header">
+              <h3 class="panel-title">Article Preview</h3>
+              <button type="button" class="btn btn-secondary btn-sm" id="close-preview-btn">Close Preview</button>
+            </div>
+            <div id="post-preview-body" style="max-width: 720px; line-height: 1.75; color: var(--text-secondary);"></div>
+          </div>
+        </section>
+
+        <!-- 3, 4, 5. MANAGE POSTS / DRAFTS / PUBLISHED -->
+        <section id="sec-posts-list" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title" id="posts-list-title">All Posts</h2>
+              <input id="posts-search-input" type="search" class="input" style="max-width: 280px;" placeholder="Filter posts..." />
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Product</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="posts-table-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. PRODUCTS MANAGEMENT -->
+        <section id="sec-products" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">MIYONI Product Ecosystem</h2>
+              <button type="button" class="btn btn-primary btn-sm" id="new-product-btn">Add Product</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Slug</th>
+                    <th>Status</th>
+                    <th>Website</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="products-table-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title" id="product-form-heading">Edit Product</h2>
+            </div>
+            <form id="product-form" class="form-grid">
+              <input type="hidden" id="prod-id" />
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="prod-name">Product Name</label>
+                  <input id="prod-name" type="text" class="input" required />
+                </div>
+                <div class="field">
+                  <label for="prod-slug">URL Slug</label>
+                  <input id="prod-slug" type="text" class="input font-mono" required />
+                </div>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="prod-tagline">Tagline</label>
+                  <input id="prod-tagline" type="text" class="input" />
+                </div>
+                <div class="field">
+                  <label for="prod-website">Official Website URL</label>
+                  <input id="prod-website" type="url" class="input" />
+                </div>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="prod-category-label">Category Label</label>
+                  <input id="prod-category-label" type="text" class="input" />
+                </div>
+                <div class="field">
+                  <label for="prod-status-label">Status Label</label>
+                  <input id="prod-status-label" type="text" class="input" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="prod-summary">Summary</label>
+                <textarea id="prod-summary" class="textarea" style="min-height: 76px;"></textarea>
+              </div>
+              <div class="field">
+                <label for="prod-description">Detailed Description (HTML supported, sanitized on save)</label>
+                <textarea id="prod-description" class="textarea" style="min-height: 130px;"></textarea>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="prod-features">Features (one per line)</label>
+                  <textarea id="prod-features" class="textarea"></textarea>
+                </div>
+                <div class="field">
+                  <label for="prod-screenshots">Screenshot URLs (one per line)</label>
+                  <textarea id="prod-screenshots" class="textarea"></textarea>
+                </div>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="prod-seo-title">SEO Title</label>
+                  <input id="prod-seo-title" type="text" class="input" />
+                </div>
+                <div class="field">
+                  <label for="prod-seo-desc">SEO Description</label>
+                  <input id="prod-seo-desc" type="text" class="input" />
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="submit" class="btn btn-primary">Save Product</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- 7. MEDIA LIBRARY -->
+        <section id="sec-media" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Upload Image to SmartBase Storage</h2>
+            </div>
+            <form id="media-upload-form" class="form-grid form-grid-2">
+              <div class="field">
+                <label for="media-file-input">Select Image (JPEG, PNG, WebP, GIF, SVG · max 5 MB)</label>
+                <input id="media-file-input" type="file" class="input" accept="image/*" required />
+              </div>
+              <div class="field">
+                <label for="media-alt-input">Descriptive Alt Text (for SEO)</label>
+                <input id="media-alt-input" type="text" class="input" placeholder="Describe the image clearly" />
+              </div>
+              <div class="field">
+                <label for="media-caption-input">Caption (optional)</label>
+                <input id="media-caption-input" type="text" class="input" placeholder="Caption shown in gallery" />
+              </div>
+              <div class="field" style="justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Upload Media</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Media Library</h2>
+            </div>
+            <div id="media-library-grid" class="media-grid"></div>
+          </div>
+        </section>
+
+        <!-- 8. COMPANY INFORMATION & HISTORY -->
+        <section id="sec-company" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Company Information</h2>
+            </div>
+            <form id="company-form" class="form-grid">
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="comp-brand">Brand Name</label>
+                  <input id="comp-brand" type="text" class="input" required />
+                </div>
+                <div class="field">
+                  <label for="comp-tagline">Tagline</label>
+                  <input id="comp-tagline" type="text" class="input" required />
+                </div>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="comp-country">Country of Origin</label>
+                  <input id="comp-country" type="text" class="input" required />
+                </div>
+                <div class="field">
+                  <label for="comp-email">Contact Email</label>
+                  <input id="comp-email" type="email" class="input" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="comp-overview">Overview</label>
+                <textarea id="comp-overview" class="textarea"></textarea>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="comp-mission">Mission</label>
+                  <textarea id="comp-mission" class="textarea"></textarea>
+                </div>
+                <div class="field">
+                  <label for="comp-vision">Vision</label>
+                  <textarea id="comp-vision" class="textarea"></textarea>
+                </div>
+              </div>
+              <div class="field">
+                <label for="comp-focus">Focus Areas (one per line)</label>
+                <textarea id="comp-focus" class="textarea"></textarea>
+              </div>
+              <div style="display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Save Company Info</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Editable Company History Timeline</h2>
+              <button type="button" class="btn btn-secondary btn-sm" id="add-milestone-btn">Add Milestone</button>
+            </div>
+            <div id="milestones-list" class="form-grid"></div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+              <button type="button" class="btn btn-primary" id="save-history-btn">Save History Timeline</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 9. FOUNDER INFORMATION -->
+        <section id="sec-founder" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Founder Profile — Roosevelt Chikwende</h2>
+            </div>
+            <form id="founder-form" class="form-grid">
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="fnd-name">Founder Name</label>
+                  <input id="fnd-name" type="text" class="input" required />
+                </div>
+                <div class="field">
+                  <label for="fnd-role">Title / Role</label>
+                  <input id="fnd-role" type="text" class="input" required />
+                </div>
+              </div>
+              <div class="field">
+                <label for="fnd-intro">Founder Introduction</label>
+                <textarea id="fnd-intro" class="textarea"></textarea>
+              </div>
+              <div class="field">
+                <label for="fnd-bio">Biography</label>
+                <textarea id="fnd-bio" class="textarea"></textarea>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="fnd-vision">Vision</label>
+                  <textarea id="fnd-vision" class="textarea"></textarea>
+                </div>
+                <div class="field">
+                  <label for="fnd-philosophy">Development Philosophy</label>
+                  <textarea id="fnd-philosophy" class="textarea"></textarea>
+                </div>
+              </div>
+              <div class="field">
+                <label for="fnd-origin">MIYONI Origin Story</label>
+                <textarea id="fnd-origin" class="textarea"></textarea>
+              </div>
+              <div style="display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Save Founder Profile</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- 10. CATEGORIES -->
+        <section id="sec-categories" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Add Category</h2>
+            </div>
+            <form id="category-form" class="form-grid form-grid-2">
+              <div class="field">
+                <label for="cat-name">Category Name</label>
+                <input id="cat-name" type="text" class="input" required placeholder="e.g. Engineering Notes" />
+              </div>
+              <div class="field">
+                <label for="cat-desc">Description</label>
+                <input id="cat-desc" type="text" class="input" placeholder="Brief description" />
+              </div>
+              <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Create Category</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Existing Categories</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Slug</th>
+                    <th>Description</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="categories-table-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 11. SEO MANAGEMENT -->
+        <section id="sec-seo" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Global SEO &amp; Search Console Verification</h2>
+            </div>
+            <form id="seo-form" class="form-grid">
+              <div class="field">
+                <label for="seo-site-title">Homepage Title</label>
+                <input id="seo-site-title" type="text" class="input" required />
+              </div>
+              <div class="field">
+                <label for="seo-default-desc">Default Meta Description</label>
+                <textarea id="seo-default-desc" class="textarea" style="min-height: 80px;"></textarea>
+              </div>
+              <div class="form-grid form-grid-2">
+                <div class="field">
+                  <label for="seo-gsc">Google Search Console Verification Token (content value only)</label>
+                  <input id="seo-gsc" type="text" class="input font-mono" placeholder="Paste Google site verification token" />
+                </div>
+                <div class="field">
+                  <label for="seo-social-image">Default Open Graph Image</label>
+                  <input id="seo-social-image" type="text" class="input" placeholder="/assets/founder-office.png" />
+                </div>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 12px; font-size: 0.85rem;">
+                  <a href="/sitemap.xml" target="_blank" rel="noopener noreferrer" style="color: var(--accent-blue);">Inspect sitemap.xml</a>
+                  <a href="/robots.txt" target="_blank" rel="noopener noreferrer" style="color: var(--accent-blue);">Inspect robots.txt</a>
+                  <a href="/rss.xml" target="_blank" rel="noopener noreferrer" style="color: var(--accent-blue);">Inspect rss.xml</a>
+                  <a href="/llms.txt" target="_blank" rel="noopener noreferrer" style="color: var(--accent-blue);">Inspect llms.txt</a>
+                </div>
+                <button type="submit" class="btn btn-primary">Save SEO Settings</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- 12. ACTIVITY LOGS -->
+        <section id="sec-activity" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Administrator Audit Log</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="full-activity-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 13. SETTINGS -->
+        <section id="sec-settings" class="admin-section hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Platform Configuration Status</h2>
+            </div>
+            <div class="form-grid">
+              <div style="display: grid; gap: 12px; color: var(--text-secondary);">
+                <div><strong>Authorized Admin:</strong> <span id="settings-admin-email" class="font-mono"></span></div>
+                <div><strong>Data Storage Backend:</strong> <span id="settings-storage-backend"></span></div>
+                <div><strong>Public Domain:</strong> <span class="font-mono">https://miyoni.de5.net/</span></div>
+                <div><strong>SmartBase Email Verification:</strong> Active via <code>smartemail.de5.net</code></div>
+              </div>
+              <p style="color: var(--text-muted); margin-top: 12px;">
+                Sensitive credentials (<code>ADMIN_EMAIL</code>, <code>SMARTBASE_EMAIL_API_KEY</code>, <code>SMARTBASE_READ_KEY</code>, <code>SMARTBASE_WRITE_KEY</code>, <code>SMARTBASE_DATABASE_ID</code>, and <code>SESSION_SECRET</code>) are stored exclusively in server/Worker environment secrets and are never exposed in browser code.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="/js/admin.js" defer></script>
+</body>
+</html>

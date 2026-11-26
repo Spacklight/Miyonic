@@ -1,0 +1,6 @@
+{
+  "name": "MIYONI — Official Digital Headquarters",
+  "description": "Official digital headquarters, product ecosystem, news platform, and CMS for MIYONI — We build functionality and quality. Founded by Roosevelt Chikwende in Malawi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

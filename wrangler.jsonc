@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "miyoni-hq",
+  "main": "worker.js",
+  "compatibility_date": "2026-03-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "vars": {
+    "SITE_URL": "https://miyoni.de5.net",
+    "SITE_NAME": "MIYONI",
+    "DEFAULT_OG_IMAGE": "https://miyoni.de5.net/assets/founder-office.png"
+  }
+}
