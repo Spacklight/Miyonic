@@ -94,9 +94,14 @@ async function startServer() {
         body,
       });
 
+      const runtimeEnv = {
+        ...process.env,
+        ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'prof200619@gmail.com',
+      };
+
       const webResponse = await handleWorkerRequest(
         webRequest,
-        process.env,
+        runtimeEnv,
         assetsFetcher,
         localPersistence
       );
