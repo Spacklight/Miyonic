@@ -4,7 +4,7 @@ Official website, product ecosystem showcase, dynamic newsroom, SEO engine, and 
 
 Target Domain: `https://miyoni.de5.net/`  
 Runtime: **Cloudflare Workers** + **Worker Assets**  
-Database & Storage: **SmartBase** (`https://smartbase.de5.net/`)  
+Database & Media Storage: **Cloudflare D1** (`miyoni`, UUID `a78a2863-9153-46ca-9b78-9a59c88b3b3d`)  
 Admin Verification: **SmartBase Email** (`https://smartemail.de5.net/`)
 
 ---
@@ -14,14 +14,14 @@ Admin Verification: **SmartBase Email** (`https://smartemail.de5.net/`)
 ```text
 miyoni/
 ├── worker.js                 # Cloudflare Worker fetch entry point
-├── wrangler.jsonc            # Cloudflare Workers + Static Assets binding config
+├── wrangler.jsonc            # Cloudflare Workers, Assets & D1 binding config
 ├── server.ts                 # Local/preview Express adapter sharing lib/router.js
 ├── package.json
 ├── .env.example              # Secret placeholders (never commit real secrets)
 ├── lib/
 │   ├── router.js             # Unified Web-Standard router (SSR + SEO + Admin APIs)
 │   ├── security.js           # Allowlist HTML sanitizer, Web Crypto HMAC, CSRF, rate limiter
-│   ├── smartbase.js          # SmartBase REST/File API + SmartBase Email client
+│   ├── smartbase.js          # Cloudflare D1 data store, D1 media storage & SmartBase Email client
 │   └── seo-render.js         # Server-rendered HTML, JSON-LD, sitemap, robots, RSS, llms.txt
 ├── public/
 │   ├── admin.html            # Private administration dashboard UI (noindex)
@@ -30,17 +30,17 @@ miyoni/
 │   │   └── admin.css         # Private dashboard stylesheet
 │   ├── js/
 │   │   ├── main.js           # Progressive mobile nav drawer
-│   │   └── admin.js          # Authenticated CMS, rich editor, media & settings UI
+│   │   └── admin.js          # Authenticated CMS, AI post assistant, media & settings UI
 │   └── assets/
 │       ├── founder-office.png
 │       ├── founder-portrait.png
 │       ├── founder-quote.png
 │       └── favicon.svg
 ├── database/
-│   ├── schema.sql            # SmartBase SQL schema & authentic seed data
-│   └── setup-guide.md        # Step-by-step SmartBase initialization guide
+│   ├── schema.sql            # Cloudflare D1 SQLite schema & authentic seed data
+│   └── setup-guide.md        # Step-by-step Cloudflare D1 initialization guide
 └── scripts/
-    └── test-worker.mjs       # Automated security, SSR, SEO & CMS test suite
+    └── test-worker.mjs       # Automated security, SSR, SEO, D1 & CMS test suite
 ```
 
 ### Architectural Note on Server-Side Rendering
@@ -48,18 +48,15 @@ Instead of relying on empty client-only SPA shells, `worker.js` server-renders c
 
 ---
 
-## 1. SmartBase Database Setup
+## 1. Cloudflare D1 Database Setup
 
 Follow [`database/setup-guide.md`](./database/setup-guide.md):
-1. Create a database in SmartBase (`https://smartbase.de5.net/`) and copy its `SMARTBASE_DATABASE_ID`.
-2. Execute [`database/schema.sql`](./database/schema.sql) in the SmartBase SQL Editor to create:
-   - `categories`
-   - `products` (seeded with SmartBase, Talkivo, XOOL, Zapamubas)
-   - `posts`
-   - `media`
-   - `site_settings`
-   - `admin_activity`
-3. Generate a read-only API key (`SMARTBASE_READ_KEY`) and a read/write API key (`SMARTBASE_WRITE_KEY`).
+1. `wrangler.jsonc` binds Cloudflare D1 `miyoni` (`a78a2863-9153-46ca-9b78-9a59c88b3b3d`) to `DB`.
+2. Execute [`database/schema.sql`](./database/schema.sql) in Cloudflare D1 Console or via Wrangler:
+   ```bash
+   npx wrangler d1 execute miyoni --remote --file=database/schema.sql
+   ```
+   This creates `categories`, `products` (seeded with SmartBase, Talkivo, XOOL, Zapamubas), `posts`, `media`, `media_chunks`, `site_settings`, and `admin_activity`.
 
 ---
 
@@ -76,10 +73,8 @@ Set all required secrets in Cloudflare Workers (never place secrets inside `wran
 ```bash
 npx wrangler secret put ADMIN_EMAIL
 npx wrangler secret put SMARTBASE_EMAIL_API_KEY
-npx wrangler secret put SMARTBASE_READ_KEY
-npx wrangler secret put SMARTBASE_WRITE_KEY
-npx wrangler secret put SMARTBASE_DATABASE_ID
 npx wrangler secret put SESSION_SECRET
+npx wrangler secret put GEMINI_API_KEY
 ```
 
 Recommended `SESSION_SECRET` generation:

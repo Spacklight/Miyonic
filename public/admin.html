@@ -144,6 +144,38 @@
 
         <!-- 2. CREATE / EDIT POST -->
         <section id="sec-create-post" class="admin-section hidden">
+          <div class="panel ai-assistant-panel">
+            <div class="panel-header" style="margin-bottom: 12px;">
+              <div>
+                <h2 class="panel-title">AI Post Assistant (Gemini)</h2>
+                <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;">
+                  Describe your new post below and Gemini will draft the headline, slug, excerpt, rich body, product link, tags, and SEO fields.
+                </div>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted);" class="tabular-nums">
+                Limit: 15 req/min · 500 req/day
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="field">
+                <label for="ai-post-description">Describe your new post</label>
+                <textarea id="ai-post-description" class="textarea" style="min-height: 82px;" placeholder="e.g. Write a launch announcement explaining that Talkivo (talkivo.de5.net) is a fast, modern, privacy-focused alternative to Omegle built under MIYONI..."></textarea>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between;">
+                <div class="field" style="min-width: 240px; flex: 1; max-width: 320px;">
+                  <label for="ai-post-model">Gemini Model</label>
+                  <select id="ai-post-model" class="select">
+                    <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (15 RPM / 500 RPD)</option>
+                    <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (15 RPM / 500 RPD)</option>
+                  </select>
+                </div>
+                <button type="button" id="ai-generate-post-btn" class="btn btn-primary">Generate Post with AI</button>
+              </div>
+              <div id="ai-assistant-status" class="alert alert-info hidden" style="margin-bottom: 0;"></div>
+            </div>
+          </div>
+
           <div class="panel">
             <div class="panel-header">
               <h2 class="panel-title" id="post-editor-heading">Create New Article or Announcement</h2>
@@ -205,20 +237,27 @@
                   <button type="button" class="btn btn-secondary btn-sm" data-cmd="insertOrderedList">Numbered List</button>
                   <button type="button" class="btn btn-secondary btn-sm" data-cmd="formatBlock" data-val="BLOCKQUOTE">Quote</button>
                   <button type="button" class="btn btn-secondary btn-sm" id="insert-link-btn">Add Link</button>
-                  <button type="button" class="btn btn-secondary btn-sm" id="insert-image-btn">Insert Media</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="insert-image-btn">Image URL</button>
+                  <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+                    Upload Photo into Body
+                    <input type="file" id="editor-image-upload-input" accept="image/*" class="hidden" />
+                  </label>
                 </div>
                 <div id="post-editor" class="editor-surface" contenteditable="true"></div>
               </div>
 
               <div class="form-grid form-grid-2">
                 <div class="field">
-                  <label for="post-cover-image">Cover Image URL (or upload below)</label>
+                  <label for="post-cover-image">Cover Picture (upload from device or paste URL)</label>
                   <div style="display: flex; gap: 8px;">
                     <input id="post-cover-image" type="text" class="input" placeholder="/media/... or /assets/founder-office.png" />
                     <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
-                      Upload
+                      Upload Picture
                       <input type="file" id="cover-upload-input" accept="image/*" class="hidden" />
                     </label>
+                  </div>
+                  <div id="cover-preview-wrap" class="upload-preview hidden">
+                    <img id="cover-image-preview" src="" alt="Cover picture preview" />
                   </div>
                 </div>
                 <div class="field">
@@ -283,8 +322,14 @@
                   <input id="post-canonical" type="url" class="input" placeholder="https://miyoni.de5.net/news/..." />
                 </div>
                 <div class="field">
-                  <label for="post-social-image">Social Sharing Image URL (optional)</label>
-                  <input id="post-social-image" type="text" class="input" placeholder="Defaults to cover image" />
+                  <label for="post-social-image">Social Sharing Image (upload or URL)</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input id="post-social-image" type="text" class="input" placeholder="Defaults to cover image" />
+                    <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+                      Upload
+                      <input type="file" id="social-image-upload-input" accept="image/*" class="hidden" />
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -409,8 +454,12 @@
                   <textarea id="prod-features" class="textarea"></textarea>
                 </div>
                 <div class="field">
-                  <label for="prod-screenshots">Screenshot URLs (one per line)</label>
+                  <label for="prod-screenshots">Product Screenshots (upload pictures or paste URLs, one per line)</label>
                   <textarea id="prod-screenshots" class="textarea"></textarea>
+                  <label class="btn btn-secondary btn-sm" style="width: fit-content; cursor: pointer;">
+                    Upload Screenshot Pictures
+                    <input type="file" id="prod-screenshot-upload" accept="image/*" multiple class="hidden" />
+                  </label>
                 </div>
               </div>
               <div class="form-grid form-grid-2">
@@ -434,7 +483,7 @@
         <section id="sec-media" class="admin-section hidden">
           <div class="panel">
             <div class="panel-header">
-              <h2 class="panel-title">Upload Image to SmartBase Storage</h2>
+              <h2 class="panel-title">Upload Image to MIYONI Media Storage</h2>
             </div>
             <form id="media-upload-form" class="form-grid form-grid-2">
               <div class="field">
@@ -634,8 +683,14 @@
                   <input id="seo-gsc" type="text" class="input font-mono" placeholder="Paste Google site verification token" />
                 </div>
                 <div class="field">
-                  <label for="seo-social-image">Default Open Graph Image</label>
-                  <input id="seo-social-image" type="text" class="input" placeholder="/assets/founder-office.png" />
+                  <label for="seo-social-image">Default Open Graph Image (upload or URL)</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input id="seo-social-image" type="text" class="input" placeholder="/assets/founder-office.png" />
+                    <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+                      Upload
+                      <input type="file" id="seo-social-upload-input" accept="image/*" class="hidden" />
+                    </label>
+                  </div>
                 </div>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center;">
@@ -688,7 +743,7 @@
                 <div><strong>SmartBase Email Verification:</strong> Active via <code>smartemail.de5.net</code></div>
               </div>
               <p style="color: var(--text-muted); margin-top: 12px;">
-                Sensitive credentials (<code>ADMIN_EMAIL</code>, <code>SMARTBASE_EMAIL_API_KEY</code>, <code>SMARTBASE_READ_KEY</code>, <code>SMARTBASE_WRITE_KEY</code>, <code>SMARTBASE_DATABASE_ID</code>, and <code>SESSION_SECRET</code>) are stored exclusively in server/Worker environment secrets and are never exposed in browser code.
+                Database records and uploaded media are persisted in <strong>Cloudflare D1</strong> (<code>miyoni</code>). Sensitive credentials (<code>ADMIN_EMAIL</code>, <code>SMARTBASE_EMAIL_API_KEY</code>, <code>SESSION_SECRET</code>, and <code>GEMINI_API_KEY</code>) are stored exclusively in Cloudflare Worker environment secrets and are never exposed in browser code.
               </p>
             </div>
           </div>

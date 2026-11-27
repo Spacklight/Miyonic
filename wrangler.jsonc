@@ -11,6 +11,13 @@
     "not_found_handling": "none",
     "run_worker_first": true
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "miyoni",
+      "database_id": "a78a2863-9153-46ca-9b78-9a59c88b3b3d"
+    }
+  ],
   "vars": {
     "ADMIN_EMAIL": "prof200619@gmail.com",
     "SITE_URL": "https://miyoni.de5.net",

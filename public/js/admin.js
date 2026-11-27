@@ -127,12 +127,22 @@
     $('stat-total-products').textContent = String(d.stats.totalProducts);
     $('stat-uploaded-media').textContent = String(d.stats.uploadedMedia);
 
+    const errors = d.dbErrors || d.smartbaseErrors || [];
     const backendLabel =
-      d.source === 'smartbase'
-        ? 'Connected to SmartBase Cloud Database'
-        : 'Local Preview Store (Configure SMARTBASE_* secrets for production SmartBase sync)';
+      d.source === 'cloudflare-d1'
+        ? errors.length
+          ? `Cloudflare D1 Warning: ${errors.join(' | ')}`
+          : 'Connected to Cloudflare D1 (miyoni)'
+        : d.source === 'smartbase'
+        ? errors.length
+          ? `SmartBase Read Warning: ${errors.join(' | ')}`
+          : 'Connected to SmartBase Cloud Database'
+        : 'Local Preview Store (Cloudflare D1 binding active when deployed)';
     $('storage-mode-label').textContent = backendLabel;
     $('settings-storage-backend').textContent = backendLabel;
+    if (errors.length) {
+      showToast(`Database error: ${errors[0]}`, 'error');
+    }
 
     renderActivityTables(d.recentActivity || []);
     renderPostDropdowns();
@@ -277,6 +287,19 @@
     }
   }
 
+  function updateCoverPreview(url) {
+    const clean = String(url || '').trim();
+    const wrap = $('cover-preview-wrap');
+    const img = $('cover-image-preview');
+    if (clean && (clean.startsWith('/') || clean.startsWith('https://') || clean.startsWith('http://'))) {
+      img.src = clean;
+      wrap.classList.remove('hidden');
+    } else {
+      img.removeAttribute('src');
+      wrap.classList.add('hidden');
+    }
+  }
+
   function loadPostIntoEditor(post) {
     $('post-id').value = String(post.id);
     $('post-title').value = post.title || '';
@@ -286,6 +309,7 @@
     $('post-excerpt').value = post.excerpt || '';
     $('post-editor').innerHTML = post.content_html || '';
     $('post-cover-image').value = post.cover_image || '';
+    updateCoverPreview(post.cover_image || '');
     $('post-youtube-url').value = post.youtube_url || '';
     $('post-product-slug').value = post.product_slug || '';
     $('post-product-url').value = post.product_url || '';
@@ -309,6 +333,8 @@
     $('post-author').value = 'Roosevelt Chikwende';
     $('post-editor-heading').textContent = 'Create New Article or Announcement';
     $('post-preview-panel').classList.add('hidden');
+    $('ai-assistant-status').classList.add('hidden');
+    updateCoverPreview('');
   }
 
   async function savePost(status) {
@@ -755,16 +781,54 @@
     }
   });
 
+  $('editor-image-upload-input').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const res = await uploadSingleFile(file, $('post-title').value || file.name);
+      $('post-editor').focus();
+      document.execCommand('insertImage', false, res.media.public_url);
+      showToast('Picture uploaded and inserted into article body.');
+      await loadDashboardData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  $('post-cover-image').addEventListener('input', (e) => {
+    updateCoverPreview(e.target.value);
+  });
+
   $('cover-upload-input').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const res = await uploadSingleFile(file, $('post-title').value || file.name);
       $('post-cover-image').value = res.media.public_url;
-      showToast('Cover image uploaded.');
+      updateCoverPreview(res.media.public_url);
+      showToast('Cover picture uploaded.');
       await loadDashboardData();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  $('social-image-upload-input').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const res = await uploadSingleFile(file, $('post-title').value || file.name);
+      $('post-social-image').value = res.media.public_url;
+      showToast('Social sharing picture uploaded.');
+      await loadDashboardData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
     }
   });
 
@@ -779,10 +843,59 @@
       }
       const existing = $('post-gallery-urls').value.trim();
       $('post-gallery-urls').value = (existing ? existing + '\n' : '') + urls.join('\n');
-      showToast(`Uploaded ${urls.length} gallery image(s).`);
+      showToast(`Uploaded ${urls.length} gallery picture(s).`);
       await loadDashboardData();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  $('ai-generate-post-btn').addEventListener('click', async () => {
+    const description = $('ai-post-description').value.trim();
+    const model = $('ai-post-model').value;
+    const statusEl = $('ai-assistant-status');
+    const btn = $('ai-generate-post-btn');
+
+    if (description.length < 10) {
+      showToast('Please describe your new post (at least 10 characters).', 'error');
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.textContent = `Generating complete draft with ${model}...`;
+    statusEl.className = 'alert alert-info';
+    statusEl.classList.remove('hidden');
+
+    try {
+      const res = await apiFetch('/api/admin/ai-draft', {
+        method: 'POST',
+        body: JSON.stringify({ description, model }),
+      });
+      const draft = res.draft || {};
+      if (draft.title) $('post-title').value = draft.title;
+      if (draft.slug) $('post-slug').value = draft.slug;
+      if (draft.content_type) $('post-type').value = draft.content_type;
+      if (draft.category_slug) $('post-category').value = draft.category_slug;
+      if (draft.excerpt) $('post-excerpt').value = draft.excerpt;
+      if (draft.content_html) $('post-editor').innerHTML = draft.content_html;
+      if (draft.product_slug !== undefined) $('post-product-slug').value = draft.product_slug;
+      if (draft.product_url !== undefined) $('post-product-url').value = draft.product_url;
+      if (Array.isArray(draft.tags)) $('post-tags').value = draft.tags.join(', ');
+      if (draft.seo_title) $('post-seo-title').value = draft.seo_title;
+      if (draft.seo_description) $('post-seo-desc').value = draft.seo_description;
+
+      const fallbackNote = res.fallbackUsed ? ` (auto-switched to ${res.modelUsed})` : '';
+      statusEl.textContent = `Draft ready via ${res.modelUsed}${fallbackNote}. Review below, upload pictures if needed, and click Publish Immediately.`;
+      statusEl.className = 'alert alert-success';
+      showToast('AI draft populated into the editor.');
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'alert alert-error';
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
     }
   });
 
@@ -810,6 +923,26 @@
   $('posts-search-input').addEventListener('input', renderPostsTable);
 
   $('new-product-btn').addEventListener('click', () => loadProductIntoForm(null));
+
+  $('prod-screenshot-upload').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    try {
+      const urls = [];
+      for (const f of files) {
+        const res = await uploadSingleFile(f, $('prod-name').value || f.name);
+        urls.push(res.media.public_url);
+      }
+      const existing = $('prod-screenshots').value.trim();
+      $('prod-screenshots').value = (existing ? existing + '\n' : '') + urls.join('\n');
+      showToast(`Uploaded ${urls.length} product screenshot(s).`);
+      await loadDashboardData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  });
 
   $('product-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -853,7 +986,7 @@
     try {
       await uploadSingleFile(file, $('media-alt-input').value.trim(), $('media-caption-input').value.trim());
       $('media-upload-form').reset();
-      showToast('Image uploaded to SmartBase storage.');
+      showToast('Picture uploaded to media storage.');
       await loadDashboardData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -958,6 +1091,21 @@
       await loadDashboardData();
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  });
+
+  $('seo-social-upload-input').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const res = await uploadSingleFile(file, 'MIYONI Open Graph Image');
+      $('seo-social-image').value = res.media.public_url;
+      showToast('Open Graph picture uploaded.');
+      await loadDashboardData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      e.target.value = '';
     }
   });
 

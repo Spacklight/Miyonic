@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import worker from '../worker.js';
@@ -141,6 +142,45 @@ function createSmartBaseMockFetch(state) {
       });
     }
 
+    if (u.startsWith('https://generativelanguage.googleapis.com/v1beta/models/')) {
+      if (u.includes('gemini-3.5-flash-lite')) {
+        return new Response(JSON.stringify({ error: { message: 'Model not found', status: 'NOT_FOUND' } }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      title: 'Talkivo: A Modern Alternative to Omegle',
+                      slug: 'talkivo-modern-alternative-to-omegle',
+                      content_type: 'Product updates',
+                      category_slug: 'product-updates',
+                      excerpt: 'Talkivo offers a modern, fast alternative to Omegle under MIYONI.',
+                      content_html:
+                        '<h2>Why Talkivo</h2><p>Talkivo is built for instant, reliable conversation.</p><script>alert(9)</script>',
+                      product_slug: 'talkivo',
+                      product_url: 'https://talkivo.de5.net/',
+                      tags: ['Talkivo', 'Omegle', 'Omegle Alternative', 'MIYONI'],
+                      seo_title: 'Talkivo — Modern Omegle Alternative by MIYONI',
+                      seo_description:
+                        'Discover Talkivo at talkivo.de5.net as a clean, reliable Omegle alternative built by MIYONI.',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     return new Response(JSON.stringify({ records: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -197,6 +237,7 @@ test('MIYONI Cloudflare Worker full security, SSR, SEO & CMS workflow', async ()
     SMARTBASE_READ_KEY: 'test-read-key',
     SMARTBASE_WRITE_KEY: 'test-write-key',
     SMARTBASE_DATABASE_ID: 'db_miyoni',
+    GEMINI_API_KEY: 'test-gemini-key',
     SESSION_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     ASSETS: createMockAssets(),
   };
@@ -372,6 +413,283 @@ test('MIYONI Cloudflare Worker full security, SSR, SEO & CMS workflow', async ()
       {}
     );
     assert.equal(badUploadRes.status, 400);
+
+    // 12. AI Post Assistant (/api/admin/ai-draft) with CSRF, 3.5 -> 3.1 fallback, and HTML sanitization
+    const aiNoCsrf = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/ai-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Host: 'miyoni.de5.net', Cookie: cookieJar },
+        body: JSON.stringify({ description: 'Talkivo Omegle alternative launch announcement' }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(aiNoCsrf.status, 403);
+
+    const aiDraftRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/ai-draft', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'miyoni.de5.net',
+          Cookie: cookieJar,
+          'X-CSRF-Token': sessionData.csrfToken,
+        },
+        body: JSON.stringify({
+          description: 'Talkivo at talkivo.de5.net is a modern alternative to Omegle built by MIYONI',
+          model: 'gemini-3.5-flash-lite',
+        }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(aiDraftRes.status, 200);
+    const aiJson = await aiDraftRes.json();
+    assert.equal(aiJson.modelUsed, 'gemini-3.1-flash-lite');
+    assert.equal(aiJson.fallbackUsed, true);
+    assert.equal(aiJson.draft.slug, 'talkivo-modern-alternative-to-omegle');
+    assert.doesNotMatch(aiJson.draft.content_html, /<script|alert\(9\)/i);
+
+    // 13. Publish AI draft and verify /search/?q=Omegle ranks Articles FIRST and top-scoring article #1
+    const publishAiRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'miyoni.de5.net',
+          Cookie: cookieJar,
+          'X-CSRF-Token': sessionData.csrfToken,
+        },
+        body: JSON.stringify({ ...aiJson.draft, status: 'published' }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(publishAiRes.status, 201);
+
+    const searchRes = await worker.fetch(new Request('https://miyoni.de5.net/search/?q=Omegle'), env, {});
+    assert.equal(searchRes.status, 200);
+    const searchHtml = await searchRes.text();
+    const articlesHeadingPos = searchHtml.indexOf('Articles &amp; Announcements');
+    const talkivoArticlePos = searchHtml.indexOf('Talkivo: A Modern Alternative to Omegle');
+    const productsHeadingPos = searchHtml.indexOf('Related Products');
+    assert.ok(articlesHeadingPos !== -1);
+    assert.ok(talkivoArticlePos > articlesHeadingPos);
+    if (productsHeadingPos !== -1) {
+      assert.ok(articlesHeadingPos < productsHeadingPos);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function createD1Adapter() {
+  const sqlite = new DatabaseSync(':memory:');
+  const makeStatement = (sql, bound = []) => ({
+    bind(...args) {
+      return makeStatement(sql, args);
+    },
+    async first() {
+      const stmt = sqlite.prepare(sql);
+      return stmt.get(...bound) ?? null;
+    },
+    async all() {
+      const stmt = sqlite.prepare(sql);
+      return { results: stmt.all(...bound) };
+    },
+    async run() {
+      const stmt = sqlite.prepare(sql);
+      const info = stmt.run(...bound);
+      return {
+        success: true,
+        meta: {
+          last_row_id: Number(info.lastInsertRowid || 0),
+          changes: Number(info.changes || 0),
+        },
+      };
+    },
+  });
+
+  return {
+    prepare(sql) {
+      return makeStatement(sql, []);
+    },
+    async batch(statements) {
+      const out = [];
+      for (const s of statements) {
+        out.push(await s.run());
+      }
+      return out;
+    },
+  };
+}
+
+test('MIYONI Cloudflare D1 (DB binding) full SQL CRUD, media upload, SEO settings & search workflow', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = createSmartBaseMockFetch({
+    lastEmailSent: null,
+    posts: [],
+    products: [],
+    media: [],
+    activity: [],
+  });
+
+  const env = {
+    SITE_URL: 'https://miyoni.de5.net',
+    ADMIN_EMAIL: 'prof200619@gmail.com',
+    SMARTBASE_EMAIL_API_KEY: 'test-email-key',
+    GEMINI_API_KEY: 'test-gemini-key',
+    SESSION_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    DB: createD1Adapter(),
+    ASSETS: createMockAssets(),
+  };
+
+  try {
+    // 1. Fresh D1 auto-initializes tables & seeds 4 MIYONI products + starter post
+    const homeRes = await worker.fetch(new Request('https://miyoni.de5.net/'), env, {});
+    assert.equal(homeRes.status, 200);
+    const homeHtml = await homeRes.text();
+    assert.match(homeHtml, /SmartBase/);
+    assert.match(homeHtml, /Talkivo/);
+    assert.match(homeHtml, /Introducing the Official MIYONI Digital Headquarters/);
+
+    // 2. Authenticate admin via SmartBase Email OTP
+    const sendRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/send-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Host: 'miyoni.de5.net' },
+        body: JSON.stringify({ email: 'prof200619@gmail.com' }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(sendRes.status, 200);
+    let cookieJar = extractCookies(sendRes);
+
+    const verifyRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Host: 'miyoni.de5.net', Cookie: cookieJar },
+        body: JSON.stringify({ email: 'prof200619@gmail.com', code: '482910' }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(verifyRes.status, 200);
+    const authJson = await verifyRes.json();
+    cookieJar = extractCookies(verifyRes);
+
+    // 3. Dashboard reports cloudflare-d1 backend cleanly
+    const dashRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/dashboard', {
+        headers: { Cookie: cookieJar },
+      }),
+      env,
+      {}
+    );
+    assert.equal(dashRes.status, 200);
+    const dashJson = await dashRes.json();
+    assert.equal(dashJson.source, 'cloudflare-d1');
+    assert.equal(dashJson.dbErrors.length, 0);
+
+    // 4. Upload PNG image (including chunked >450KB image path!) to D1 and fetch via /media/:name
+    const smallPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const smallForm = new FormData();
+    smallForm.append('file', new Blob([smallPng], { type: 'image/png' }), 'talkivo-cover.png');
+    const smallUploadRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/media', {
+        method: 'POST',
+        headers: { Host: 'miyoni.de5.net', Cookie: cookieJar, 'X-CSRF-Token': authJson.csrfToken },
+        body: smallForm,
+      }),
+      env,
+      {}
+    );
+    assert.equal(smallUploadRes.status, 201);
+    const smallMedia = (await smallUploadRes.json()).media;
+    const fetchedSmall = await worker.fetch(new Request(`https://miyoni.de5.net${smallMedia.public_url}`), env, {});
+    assert.equal(fetchedSmall.status, 200);
+    assert.equal(fetchedSmall.headers.get('content-type'), 'image/png');
+    assert.deepEqual(new Uint8Array(await fetchedSmall.arrayBuffer()), smallPng);
+
+    // Large image (> 450KB base64 -> triggers media_chunks in D1)
+    const largePng = new Uint8Array(400 * 1024);
+    largePng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    largePng[largePng.length - 1] = 0x7f;
+    const largeForm = new FormData();
+    largeForm.append('file', new Blob([largePng], { type: 'image/png' }), 'large-hero.png');
+    const largeUploadRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/media', {
+        method: 'POST',
+        headers: { Host: 'miyoni.de5.net', Cookie: cookieJar, 'X-CSRF-Token': authJson.csrfToken },
+        body: largeForm,
+      }),
+      env,
+      {}
+    );
+    assert.equal(largeUploadRes.status, 201);
+    const largeMedia = (await largeUploadRes.json()).media;
+    const fetchedLarge = await worker.fetch(new Request(`https://miyoni.de5.net${largeMedia.public_url}`), env, {});
+    assert.equal(fetchedLarge.status, 200);
+    assert.deepEqual(new Uint8Array(await fetchedLarge.arrayBuffer()), largePng);
+
+    // 5. Save SEO settings directly to D1 without error
+    const seoSaveRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'miyoni.de5.net',
+          Cookie: cookieJar,
+          'X-CSRF-Token': authJson.csrfToken,
+        },
+        body: JSON.stringify({
+          key: 'seo_settings',
+          value: {
+            siteTitle: 'MIYONI — D1 Verified Title',
+            defaultDescription: 'Official MIYONI platform powered by Cloudflare D1.',
+            googleSiteVerification: 'dj706lIIs5TcH4Lc-xOxQhoPcodmaqRL-CYhx7DGCSw',
+            socialImage: smallMedia.public_url,
+          },
+        }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(seoSaveRes.status, 200);
+
+    // 6. Publish a Talkivo Omegle alternative post in D1 and confirm /search/?q=Omegle ranks it first
+    const createPostRes = await worker.fetch(
+      new Request('https://miyoni.de5.net/api/admin/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'miyoni.de5.net',
+          Cookie: cookieJar,
+          'X-CSRF-Token': authJson.csrfToken,
+        },
+        body: JSON.stringify({
+          title: 'Talkivo: The Modern Alternative to Omegle',
+          content_type: 'Product updates',
+          excerpt: 'Talkivo on talkivo.de5.net is a fast, clean Omegle alternative by MIYONI.',
+          content_html: '<p>Meet Talkivo, a modern Omegle alternative built by MIYONI.</p>',
+          cover_image: smallMedia.public_url,
+          product_slug: 'talkivo',
+          tags: ['Talkivo', 'Omegle', 'Omegle alternative'],
+          status: 'published',
+          is_featured: true,
+        }),
+      }),
+      env,
+      {}
+    );
+    assert.equal(createPostRes.status, 201);
+
+    const d1SearchRes = await worker.fetch(new Request('https://miyoni.de5.net/search/?q=Omegle'), env, {});
+    assert.equal(d1SearchRes.status, 200);
+    const d1SearchHtml = await d1SearchRes.text();
+    assert.match(d1SearchHtml, /Talkivo: The Modern Alternative to Omegle/);
+    assert.match(d1SearchHtml, /Articles &amp; Announcements/);
   } finally {
     globalThis.fetch = originalFetch;
   }

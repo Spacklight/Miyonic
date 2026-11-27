@@ -3,6 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI, Type } from '@google/genai';
 import { handleWorkerRequest } from './lib/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,6 +39,103 @@ const localPersistence = {
     fs.writeFileSync(LOCAL_DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   },
 };
+
+async function aiGenerator({
+  description,
+  model,
+  products,
+  categories,
+  env,
+}: {
+  description: string;
+  model: string;
+  products: Array<{ slug: string; name: string; website_url?: string; summary?: string }>;
+  categories: Array<{ slug: string; name: string }>;
+  env: Record<string, string | undefined>;
+}) {
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) {
+    const err = new Error('GEMINI_API_KEY is not configured in server secrets.') as Error & { status?: number };
+    err.status = 503;
+    throw err;
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+
+  const productContext = (products || [])
+    .map((p) => `- ${p.slug} (${p.name}): ${p.website_url || ''} — ${p.summary || ''}`)
+    .join('\n');
+  const categoryContext = (categories || []).map((c) => `${c.slug} (${c.name})`).join(', ');
+
+  const systemInstruction = `You are the official editorial and SEO writer for MIYONI ("We build functionality and quality."), an independent technology company founded by Roosevelt Chikwende in Malawi.
+Generate a complete, authentic, well-structured, SEO-strong article or announcement from the user's description.
+Make sure primary search keywords appear naturally in the title, excerpt, tags, SEO fields, and body headings so the article ranks at the top of search results.
+Use only clean semantic HTML in content_html (<p>, <h2>, <h3>, <ul>, <ol>, <li>, <blockquote>, <strong>, <em>, <a>).
+
+Available category_slug options: ${categoryContext || 'company-announcements'}
+MIYONI Products:
+${productContext}`;
+
+  const invoke = async (targetModel: string) => {
+    const response = await ai.models.generateContent({
+      model: targetModel,
+      contents: `Create a complete MIYONI news/blog post draft based on this description:\n\n${description}`,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            slug: { type: Type.STRING },
+            content_type: { type: Type.STRING },
+            category_slug: { type: Type.STRING },
+            excerpt: { type: Type.STRING },
+            content_html: { type: Type.STRING },
+            product_slug: { type: Type.STRING },
+            product_url: { type: Type.STRING },
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+            seo_title: { type: Type.STRING },
+            seo_description: { type: Type.STRING },
+          },
+          required: ['title', 'slug', 'content_type', 'category_slug', 'excerpt', 'content_html', 'tags'],
+        },
+      },
+    });
+    return {
+      text: (response.text ?? '{}').trim(),
+      modelUsed: targetModel,
+    };
+  };
+
+  let out;
+  let fallbackUsed = false;
+  try {
+    out = await invoke(model);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = (err as { status?: number })?.status;
+    if ((status === 404 || /not found|404/i.test(msg)) && model !== 'gemini-3.1-flash-lite') {
+      out = await invoke('gemini-3.1-flash-lite');
+      fallbackUsed = true;
+    } else {
+      throw err;
+    }
+  }
+
+  return {
+    parsed: JSON.parse(out.text),
+    modelUsed: out.modelUsed,
+    fallbackUsed,
+  };
+}
 
 async function assetsFetcher(webRequest: Request): Promise<Response> {
   const url = new URL(webRequest.url);
@@ -103,7 +201,8 @@ async function startServer() {
         webRequest,
         runtimeEnv,
         assetsFetcher,
-        localPersistence
+        localPersistence,
+        aiGenerator
       );
 
       res.status(webResponse.status);
